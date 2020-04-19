@@ -51,7 +51,7 @@ main :: IO ()
 main = do
     [t,a,b] <- getReadList :: IO [Int]
     -- traceShowM (t,a,b)
-    replicateM_ t $ docase a b
+    replicateM_ (t-1) $ docase a b
 
 -- Find the minimum value in range [lo..hi] that satisfies the test.
 -- The test must be true over a single continuous range.
@@ -72,7 +72,7 @@ printpt (x,y) = printf "%d %d\n" x y >> hFlush stdout
 
 bullseye :: Pt -> IO ()
 bullseye pt@(x,y) = do
-    -- traceShowM ("bullseye",pt)
+    traceShowM ("bullseye",pt)
     go (pt:cands)
   where
     cands =
@@ -94,7 +94,7 @@ bullseye pt@(x,y) = do
 
 checkHit :: Pt -> IO Bool
 checkHit pt = do
-    -- traceShowM ("checkHit",pt)
+    traceShowM ("checkHit",pt)
     printpt pt
     getLine >>= pure . check
   where
@@ -120,7 +120,7 @@ initTarget = do
 
 docase :: Int -> Int -> IO ()
 docase a b = do
-    -- traceShowM "starting"
+    traceShowM "starting"
     (x,y) <- initTarget
     -- traceShowM ("initTarget",(x,y))
     xlo <- findMinM (checkHit . (,y)) (-size) x
