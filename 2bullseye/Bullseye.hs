@@ -8,6 +8,7 @@
 {-# LANGUAGE FlexibleInstances #-}
 {-# LANGUAGE LambdaCase        #-}
 {-# LANGUAGE PatternSynonyms   #-}
+{-# LANGUAGE RankNTypes        #-}
 {-# LANGUAGE TupleSections     #-}
 
 module Main where
@@ -36,17 +37,21 @@ getReadList = map read . words <$> getLine
 
 -- types {{{1
 
-type Pt        = (Int,Int)
+type Pt = (Int,Int)
 
--- If the judge responds CENTER or WRONG, then we are done,
--- and the Left result will break out of our monad.
--- The Right result is True iff the query point was a hit.
-type Answer    = Either Bool Bool
-
+type Answer = Either Bool Bool
 pattern CENTER = Left True
 pattern WRONG  = Left False
 pattern HIT    = Right True
 pattern MISS   = Right False
+
+-- The monad for interactions with the judge. We ask about a point,
+-- and the response is in `ExceptT e m a`, where `e` is the `Left` of
+-- the `Answer` type and `a` is the `Right` of the `Answer` type.
+class Monad m => AnswerM m where
+    isHit :: Pt -> ExceptT Bool m Bool
+
+-- parse and pretty-print {{{2
 
 parse :: String -> Answer
 parse = \case
@@ -56,12 +61,12 @@ parse = \case
     "MISS"   -> MISS
     s -> error $ printf "invalid answer: %s" (show s)
 
--- The returned Bool is True iff we hit the CENTER,
--- and False iff we received WRONG.
-type Return = ExceptT Bool
-
-class Monad m => AnswerM m where
-    isHit :: Pt -> Return m Bool
+pretty :: Answer -> String
+pretty = \case
+    CENTER -> "CENTER"
+    WRONG  -> "WRONG"
+    HIT    -> "HIT"
+    MISS   -> "MISS"
 
 -- main {{{1
 
@@ -83,47 +88,48 @@ query (x,y) = do
 
 -- test {{{1
 
-test :: Monad m => Int -> (Int,Int) -> m ()
-test r ctr = runReaderT go env where
-    go = do
-        final <- runExceptT $ solve (2*r)
-        traceShowM final
-        pure ()
-    env = Target (r,ctr)
+newtype Target = Target (Int,Int,(Int,Int)) deriving Show
 
-newtype Target = Target (Int,(Int,Int)) deriving Show
+test :: Monad m => Int -> Int -> (Int,Int) -> m ()
+test size r ctr = runReaderT go env where
+    go = void $ runExceptT $ solve size
+    env = Target (size,r,ctr)
 
 instance Monad m => AnswerM (ReaderT Target m) where 
-    isHit (x,y) = do
-        Target (r, (x0,y0)) <- lift ask
-        let ans = check (x-x0) (y-y0) r
-        traceShowM ((x,y),ans)
+    isHit pt = do
+        ans <- inTarget pt <$> lift ask
+        traceShowM (pt, pretty ans)
         except ans
-      where
-        check 0 0 _ = CENTER
-        check u v r 
-            | u*u + v*v > r*r = MISS
-            | otherwise       = HIT
+
+inTarget :: Pt -> Target -> Answer
+inTarget (x,y) (Target (size,r,(x0,y0)))
+    | x < -size || x > size || y < -size || y > size = WRONG
+    | u == 0 && v == 0 = CENTER
+    | u*u + v*v > r*r  = MISS
+    | otherwise        = HIT
+  where
+    u = x - x0
+    v = y - y0
 
 -- solve {{{1
 
-solve :: AnswerM m => Int -> Return m ()
-solve size = findTarget size >>= \case
-    Nothing -> error "could not find target"
-    Just (x,y) -> do
-        xlo <- findMinM (isHit . (,y)) (-size) x
-        ylo <- findMinM (isHit . (x,)) (-size) y
-        xhi <- negate <$> findMinM (isHit . (,y) . negate) (-size) (-x)
-        yhi <- negate <$> findMinM (isHit . (x,) . negate) (-size) (-y)
-        let xctr = div (xlo + xhi) 2
-        let yctr = div (ylo + yhi) 2
-        void $ isHit (xctr,yctr) -- should break from Outer on CENTER result
-        error "missed on bullseye hit"
+type Solve a = forall m . AnswerM m => Int -> ExceptT Bool m a
 
-findTarget :: AnswerM m => Int -> Return m (Maybe Pt)
+solve :: Solve ()
+solve size = do
+    (x,y) <- findTarget size
+    xlo <- findMinM (isHit . (,y)) (-size) x
+    ylo <- findMinM (isHit . (x,)) (-size) y
+    xhi <- negate <$> findMinM (isHit . (,y) . negate) (-size) (-x)
+    yhi <- negate <$> findMinM (isHit . (x,) . negate) (-size) (-y)
+    let xctr = div (xlo + xhi) 2
+    let yctr = div (ylo + yhi) 2
+    void $ isHit (xctr,yctr) -- will leave ExceptT on CENTER
+    error "missed on bullseye hit"
+
+findTarget :: Solve Pt
 findTarget size = go $ (0,0) : quads
   where
     quads = (,) <$> [-h,h] <*> [-h,h] where h = div size 2
-    go [] = pure Nothing
-    go (pt:more) =
-        ifM (isHit pt) (pure $ Just pt) (go more)
+    go [] = error "could not find target" -- should not be possible
+    go (pt:more) = ifM (isHit pt) (pure pt) (go more)
