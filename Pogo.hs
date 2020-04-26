@@ -3,68 +3,17 @@
 -- vim: foldmethod=marker
 
 -- pragmas, imports, and utilities {{{1
-{-# LANGUAGE FlexibleInstances     #-}
-{-# LANGUAGE LambdaCase            #-}
-{-# LANGUAGE MultiParamTypeClasses #-}
-{-# LANGUAGE RankNTypes            #-}
-{-# LANGUAGE TupleSections         #-}
+{-# LANGUAGE PatternSynonyms #-}
+{-# LANGUAGE RecordWildCards #-}
+{-# LANGUAGE TupleSections   #-}
 
 module Main where
 
-import Control.Monad              ( forM_               )
-import Control.Monad.Trans.Reader ( ReaderT, runReaderT )
-import Text.Printf                ( printf              )
-
-ifM :: Monad m => m Bool -> m a -> m a -> m a
-ifM bm tm em = bm >>= \b -> if b then tm else em
+import Control.Monad ( forM_  )
+import Text.Printf   ( printf )
 
 getReadList :: Read a => IO [a]
 getReadList = map read . words <$> getLine
-
-class Monad m => SearchM a m where
-    goal :: a -> m Bool
-    next :: a -> m [a]
-
-type Result a = Either Bool a
-
-dfSearchM :: SearchM a m => a -> m (Result a)
-dfSearchM a = go [a] where
-    go [] = pure (Left False)
-    go (x:xx) = ifM (goal x) (pure $ Right x) $
-        next x >>= go . (++xx)
-
-dlSearchM :: SearchM a m => Int -> a -> m (Result a)
-dlSearchM d a = go False [(0,a)] where
-    go limit [] = pure (Left limit)
-    go limit ((i,x):xx) = ifM (goal x) (pure $ Right x) $
-        if i >= d
-        then go True xx
-        else next x >>= go limit . (++xx) . map (i+1,)
-
-idSearchM :: SearchM a m => a -> m (Result a)
-idSearchM a = go 1 where
-    go i = dlSearchM i a >>= \case
-        Left True -> go (i+1)
-        answer -> pure answer
-
--- types {{{1
-
-data Env = Env
-data Dir = N | S | E | W deriving (Eq,Show)
-type State = ([Dir],(Int,Int))
-
-instance Monad m => SearchM State (ReaderT Env m) where
-    goal (_,xy) = pure $ xy == (0,0)
-    next (dd,(x,y))
-        | odd x && even y = pure
-            [ (E:dd, (div (x-1) 2, div y 2))
-            , (W:dd, (div (x+1) 2, div y 2)) ]
-        | even x && odd y = pure
-            [ (N:dd, (div x 2, div (y-1) 2))
-            , (S:dd, (div x 2, div (y+1) 2)) ]
-        | otherwise = pure []
-
--- main {{{1
 
 main :: IO ()
 main = do
@@ -73,6 +22,35 @@ main = do
         printf "Case #%d: " i
         docase
 
+type Result a = Either Bool a
+pattern CUTOFF  = Left True
+pattern FAILURE = Left False
+pattern SUCCESS a = Right a
+
+data Search a = Search
+    { _goal :: a -> Bool
+    , _next :: a -> [a]
+    }
+
+type SearchFn a = a -> Search a -> Result a
+
+dlSearch :: Int -> SearchFn a
+dlSearch d a Search {..} = go False [(0,a)] where
+    go cutoff [] = Left cutoff
+    go cutoff ((i,x):xx)
+        | _goal x   = Right x
+        | i >= d    = go True xx
+        | otherwise = go cutoff (xx' ++ xx)
+      where xx' = (i+1,) <$> _next x
+
+idSearch :: SearchFn a
+idSearch a s = go 1 where
+    go i = case dlSearch i a s of
+        CUTOFF -> go (i+1)
+        answer -> answer
+
+-- solution {{{1
+
 docase :: IO ()
 docase = do
     [x,y] <- getReadList :: IO [Int]
@@ -80,11 +58,23 @@ docase = do
         Nothing -> putStrLn "IMPOSSIBLE"
         Just dd -> putStrLn $ concatMap show dd
 
--- solve {{{1
+data Dir = N | S | E | W deriving (Eq,Show)
+type State = ([Dir],(Int,Int))
+
+env :: Search State
+env = Search goal next where
+    goal (_,(0,0)) = True
+    goal _         = False
+    next (dd,(x,y))
+        | odd x && even y =
+            [ (E:dd, (div (x-1) 2, div y 2))
+            , (W:dd, (div (x+1) 2, div y 2)) ]
+        | even x && odd y =
+            [ (N:dd, (div x 2, div (y-1) 2))
+            , (S:dd, (div x 2, div (y+1) 2)) ]
+        | otherwise = []
 
 solve :: (Int,Int) -> Maybe [Dir]
-solve pt =
-    let init = ([],pt) :: State in
-    runReaderT (idSearchM init) Env >>= \case
-        Left _       -> Nothing
-        Right (dd,_) -> Just $ reverse dd
+solve pt = case idSearch ([],pt) env of
+    FAILURE        -> Nothing
+    SUCCESS (dd,_) -> Just $ reverse dd
