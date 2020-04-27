@@ -2,7 +2,7 @@
 -- https://codingcompetitions.withgoogle.com/codejam/round/000000000019fef2/00000000002d5b62
 -- vim: foldmethod=marker
 
--- pragmas, imports, and utilities {{{1
+-- boilerplate {{{1
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections   #-}
@@ -22,26 +22,28 @@ main = do
         printf "Case #%d: " i
         docase
 
+-- search {{{2
+
 type Result a = Either Bool a
 pattern CUTOFF  = Left True
 pattern FAILURE = Left False
 pattern SUCCESS a = Right a
 
 data Search a = Search
-    { _goal :: a -> Bool
-    , _next :: a -> [a]
+    { _isGoal :: a -> Bool
+    , _spawn  :: a -> [a]
     }
 
 type SearchFn a = a -> Search a -> Result a
 
 dlSearch :: Int -> SearchFn a
-dlSearch d a Search {..} = go False [(0,a)] where
-    go cutoff [] = Left cutoff
-    go cutoff ((i,x):xx)
-        | _goal x   = Right x
-        | i >= d    = go True xx
-        | otherwise = go cutoff (xx' ++ xx)
-      where xx' = (i+1,) <$> _next x
+dlSearch d a Search {..} = go FAILURE [(0,a)] where
+    go why [] = why
+    go why ((i,x):xx)
+        | _isGoal x = SUCCESS x
+        | i >= d    = go CUTOFF xx
+        | otherwise = go why (xx' ++ xx)
+      where xx' = (i+1,) <$> _spawn x
 
 idSearch :: SearchFn a
 idSearch a s = go 1 where
@@ -61,18 +63,22 @@ docase = do
 data Dir = N | S | E | W deriving (Eq,Show)
 type State = ([Dir],(Int,Int))
 
+isGoal :: State -> Bool
+isGoal (_,(0,0)) = True
+isGoal _         = False
+
+spawn :: State -> [State]
+spawn (dd,(x,y))
+    | odd x && even y =
+        [ (E:dd, (div (x-1) 2, div y 2))
+        , (W:dd, (div (x+1) 2, div y 2)) ]
+    | even x && odd y =
+        [ (N:dd, (div x 2, div (y-1) 2))
+        , (S:dd, (div x 2, div (y+1) 2)) ]
+    | otherwise = []
+
 env :: Search State
-env = Search goal next where
-    goal (_,(0,0)) = True
-    goal _         = False
-    next (dd,(x,y))
-        | odd x && even y =
-            [ (E:dd, (div (x-1) 2, div y 2))
-            , (W:dd, (div (x+1) 2, div y 2)) ]
-        | even x && odd y =
-            [ (N:dd, (div x 2, div (y-1) 2))
-            , (S:dd, (div x 2, div (y+1) 2)) ]
-        | otherwise = []
+env = Search isGoal spawn
 
 solve :: (Int,Int) -> Maybe [Dir]
 solve pt = case idSearch ([],pt) env of
