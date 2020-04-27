@@ -61,9 +61,7 @@ next t = do
     bwd p i = find q [i,i-1..0] where q = p . T.index t
 
 solve :: Int -> Int -> [Move]
-solve r s = go [] deck where
-    len = r*s
-    deck = T.replicate s $ T.pack $ take r ['0'..]
+solve r s = go [] (mkDeck r s) where
     go mm t = case next t of
         Nothing -> reverse mm
         Just m -> go (m:mm) (move m t)
