@@ -2,21 +2,16 @@
 -- https://codingcompetitions.withgoogle.com/codejam/round/000000000019fef2/00000000002d5b64
 -- vim: foldmethod=marker
 
--- pragmas, imports, and utilities {{{1
-{-# LANGUAGE BangPatterns    #-}
-{-# LANGUAGE PatternSynonyms #-}
-{-# LANGUAGE RankNTypes      #-}
-{-# LANGUAGE RecordWildCards #-}
+-- boilerplate {{{1
 
 module Main where
 
-import Control.Applicative ( (<|>)      )
-import Control.Monad       ( forM_      )
-import Data.List           ( find       )
-import Data.Monoid         ( (<>)       )
-import Data.Text           ( Text       )
-import Debug.Trace         ( traceShowM )
-import Text.Printf         ( printf     )
+import Control.Applicative ( (<|>)  )
+import Control.Monad       ( forM_  )
+import Data.List           ( find   )
+import Data.Monoid         ( (<>)   )
+import Data.Text           ( Text   )
+import Text.Printf         ( printf )
 import qualified Data.Text as T
 
 getReadList :: Read a => IO [a]
@@ -31,6 +26,8 @@ main = do
 
 -- solution {{{1
 
+type Move = (Int,Int) -- (A,B)
+
 docase :: IO ()
 docase = do
     [r,s] <- getReadList :: IO [Int]
@@ -40,7 +37,8 @@ docase = do
   where
     out (a,b) = printf "%d %d\n" a b
 
-type Move = (Int,Int)
+mkDeck :: Int -> Int -> Text
+mkDeck r s = T.replicate s $ T.pack $ take r ['0'..] -- r <= 40
 
 move :: Move -> Text -> Text
 move (a,b) t = bb <> aa <> cc where
@@ -53,12 +51,10 @@ next t = do
     chg <- fwd (/=top) 1   -- top run changes
     nxt <- fwd (==top) chg -- next top run
     let more = do
-            end <- fwd (/=top) nxt            -- next top run changes
+            end <- fwd (/=top) nxt            -- run after inner top run
             prv <- bwd (== T.index t end) nxt -- end of previous match
-            let m = (prv+1, end-prv-1)
-            -- traceShowM (t,m,chg,nxt,end,prv)
-            pure m
-    more <|> pure (chg,nxt-chg) -- top and bottom are the same
+            pure (prv+1, end-prv-1)
+    more <|> pure (chg,nxt-chg) -- no inner top run
   where
     len = T.length t
     fwd p i = find q [i..len-1] where q = p . T.index t
