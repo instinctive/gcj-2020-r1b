@@ -3,16 +3,21 @@
 -- vim: foldmethod=marker
 
 -- pragmas, imports, and utilities {{{1
+{-# LANGUAGE BangPatterns    #-}
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RankNTypes      #-}
 {-# LANGUAGE RecordWildCards #-}
 
 module Main where
 
-import Control.Monad ( forM_         )
-import Data.List     ( foldl', group )
-import Debug.Trace   ( traceShow     )
-import Text.Printf   ( printf        )
+import Control.Monad ( forM_                    )
+import Data.List     ( foldl', minimumBy, tails )
+import Data.Monoid   ( (<>)                     )
+import Data.Ord      ( comparing                )
+import Data.Text     ( Text                     )
+import Debug.Trace   ( traceShow, traceShowId   )
+import Text.Printf   ( printf                   )
+import qualified Data.Text as T
 
 getReadList :: Read a => IO [a]
 getReadList = map read . words <$> getLine
@@ -20,30 +25,12 @@ getReadList = map read . words <$> getLine
 main :: IO ()
 main = do
     [t] <- getReadList :: IO [Int]
-    forM_ [1..t] $ \i -> do
+    if t == 0 then do
+        [nr,ns] <- getReadList :: IO [Int]
+        table nr ns
+    else forM_ [1..t] $ \i -> do
         printf "Case #%d: " i
         docase
-
--- skew heaps {{{1
-
-data Skew a = SkewEmpty | SkewNode a (Skew a) (Skew a)
-
-mkSkew :: Ord a => a -> Skew a
-mkSkew a = SkewNode a SkewEmpty SkewEmpty
-
-skewInsert :: Ord a => a -> Skew a -> Skew a
-skewInsert a t = skewUnion (mkSkew a) t
-
-skewUnion :: Ord a => Skew a -> Skew a -> Skew a
-skewUnion SkewEmpty t2 = t2
-skewUnion t1 SkewEmpty = t1
-skewUnion t1@(SkewNode a1 l1 r1) t2@(SkewNode a2 l2 r2)
-    | a1 <= a2  = SkewNode a1 (skewUnion t2 r1) l1
-    | otherwise = SkewNode a2 (skewUnion t1 r2) l2
-
-skewExtract :: Ord a => Skew a -> Maybe (a, Skew a)
-skewExtract SkewEmpty = Nothing
-skewExtract (SkewNode a l r) = Just (a, skewUnion l r)
 
 -- search {{{1
 
@@ -53,29 +40,17 @@ pattern FAILURE = Left False
 pattern SUCCESS a = Right a
 
 data Search a = Search
-    { _goal :: a -> Bool
-    , _next :: a -> [a]
+    { _isGoal :: a -> Bool
+    , _spawn  :: a -> [a]
     }
 
 type SearchFn a = a -> Search a -> Result a
 
-data Heur r a = Heur r a
-instance Eq r => Eq (Heur r a) where
-    Heur x _ == Heur y _ = x == y
-instance Ord r => Ord (Heur r a) where
-    Heur x _ <= Heur y _ = x <= y
-
-aStarSearch :: (Show a, Ord r) => (a -> r) -> SearchFn a
-aStarSearch heur a Search {..} = go init where
-    init = mkSkew $ mk a
-    mk a = Heur (heur a) a
-    go h = case skewExtract h of
-        Nothing -> FAILURE
-        Just (Heur _ x, h')
-            -- | traceShow x False -> undefined
-            | _goal x -> SUCCESS x
-            | otherwise -> go $ 
-                foldl' (flip skewInsert) h' (mk <$> _next x)
+greedy :: Ord r => (a -> r) -> SearchFn a
+greedy heur a Search {..} = go a where
+    go x | _isGoal x = SUCCESS x
+    go x | otherwise = go best where
+        best = minimumBy (comparing heur) (_spawn x)
 
 -- solution {{{1
 
@@ -88,31 +63,76 @@ docase = do
   where
     out (a,b) = printf "%d %d\n" a b
 
-type State = ([(Int,Int)],[[Int]])
+type Move = (Int,Int) -- (A,B)
+type Deck = Text
 
-heur :: State -> Int
-heur (_,gg) = length gg + inversions where
-    inversions = length . filter id $
-        zipWith (>) (head <$> gg) (head <$> tail gg)
+mkDeck :: Int -> Int -> Deck
+mkDeck r s = T.replicate s $ T.pack $ take r ['0'..]
 
-env :: Search State
-env = Search goal next where
-    goal (_,gg) = and $ zipWith (<) (head <$> gg) (head <$> tail gg)
-    next (mm,gg) =
-        [ ((na,nb):mm, gg')
-        | let n = length gg
-        , a <- [1..n-2]
-        , b <- [1..n-1-a]
-        , let (aa,xx) = splitAt a gg
-        , let (bb,cc) = splitAt b xx
-        , let na = length (concat aa)
-        , let nb = length (concat bb)
-        , let gg' = group . concat $ bb ++ aa ++ cc
-        ]
+move :: Move -> Text -> Text
+move (a,b) t = bb <> aa <> cc where
+    (aa,bbcc) = T.splitAt a t
+    (bb,cc)   = T.splitAt b bbcc
 
-solve :: Int -> Int -> [(Int,Int)]
-solve r s = case aStarSearch heur ([],gg) env of
-    SUCCESS (mm,_) -> reverse mm
+score :: Text -> Int
+score t = snd $ foldl' f (' ',0) [0..T.length t-1] where
+    f z@(c,s) i
+        | q < c = (q,s+2) -- inversion
+        | q > c = (q,s+1) -- new run
+        | otherwise = z   -- same run
+      where q = T.index t i
+
+runs :: Text -> [Int] -- start positions of runs
+runs t = reverse . snd $ foldl' f (' ',[]) [0..T.length t-1] where
+    f z@(c,ii) i
+        | q == c = z
+        | otherwise = (q,i:ii)
+      where q = T.index t i
+
+data State = State
+    { _moves :: [Move]
+    , _score :: Int
+    , _runs  :: [Int]
+    , _deck  :: Deck
+    } deriving Show
+
+mkState :: [Move] -> Deck -> State
+mkState moves deck = State moves thscore (reverse thruns) deck where
+    (_,thscore,thruns) = foldl' f (' ',0,[]) [0..T.length deck - 1]
+    f z@(c,!s,!rr) i
+        | q < c = (q,s+2,i:rr) -- inversion
+        | q > c = (q,s+1,i:rr) -- new run
+        | otherwise = z        -- same run
+      where q = T.index deck i
+
+isGoal :: Int -> State -> Bool
+isGoal r State {..} = _score == r
+
+spawn :: State -> [State]
+spawn State {..} =
+    [ mkState ((a,b):_moves) (move (a,b) _deck)
+    | (a:more) <- tails (tail _runs)
+    , (x:xtra) <- tails more
+    , let b = x - a
+    ]
+
+mkEnv :: Int -> Search State
+mkEnv r = Search (isGoal r) spawn
+
+solve :: Int -> Int -> [Move]
+solve r s = case greedy heur start env of
+    SUCCESS State {..} -> reverse _moves
     _ -> error "could not find a solution"
   where
-    gg = group . concat $ replicate s [1..r]
+    heur  = _score
+    start = mkState [] (mkDeck r s)
+    env   = mkEnv r
+
+table :: Int -> Int -> IO ()
+table nr ns = do
+    printf "      " >> forM_ [2..nr] (printf "R=%02d ") >> newline
+    forM_ [2..ns] $ \s -> do
+        printf "S=%02d: " s
+        forM_ [2..nr] $ \r -> printf "  %2d " (length $ solve r s)
+        newline
+  where newline = putStrLn ""
