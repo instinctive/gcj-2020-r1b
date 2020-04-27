@@ -3,6 +3,7 @@
 -- vim: foldmethod=marker
 
 -- boilerplate {{{1
+
 {-# LANGUAGE PatternSynonyms #-}
 {-# LANGUAGE RecordWildCards #-}
 {-# LANGUAGE TupleSections   #-}
