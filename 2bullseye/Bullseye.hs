@@ -2,7 +2,7 @@
 -- https://codingcompetitions.withgoogle.com/codejam/round/000000000019fef2/00000000002d5b63
 -- vim: foldmethod=marker
 
--- pragmas, imports, and utilities {{{1
+-- boilerplate {{{1
 
 {-# LANGUAGE FlexibleContexts  #-}
 {-# LANGUAGE FlexibleInstances #-}
@@ -21,6 +21,9 @@ import Debug.Trace                ( traceShowM                  )
 import System.IO                  ( hFlush, stdout              )
 import Text.Printf                ( printf                      )
 
+getReadList :: Read a => IO [a]
+getReadList = map read . words <$> getLine
+
 ifM :: Monad m => m Bool -> m a -> m a -> m a
 ifM bm tm em = bm >>= \b -> if b then tm else em
 
@@ -31,9 +34,6 @@ findMinM test = go where
         | otherwise = do
             let md = div (lo + hi) 2
             ifM (test md) (go lo md) (go (md+1) hi)
-
-getReadList :: Read a => IO [a]
-getReadList = map read . words <$> getLine
 
 -- types {{{1
 
