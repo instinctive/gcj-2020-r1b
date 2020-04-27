@@ -50,11 +50,12 @@ next t = do
     let top = T.index t 0  -- the top run
     chg <- fwd (/=top) 1   -- top run changes
     nxt <- fwd (==top) chg -- next top run
-    let more = do
+    let inner = do
             end <- fwd (/=top) nxt            -- run after inner top run
             prv <- bwd (== T.index t end) nxt -- end of previous match
             pure (prv+1, end-prv-1)
-    more <|> pure (chg,nxt-chg) -- no inner top run
+    let outer = pure (chg,nxt-chg) -- no inner top run
+    inner <|> outer
   where
     len = T.length t
     fwd p i = find q [i..len-1] where q = p . T.index t
